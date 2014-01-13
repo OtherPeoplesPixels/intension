@@ -2,7 +2,25 @@
   (:refer-clojure :exclude [comp complement constantly fn juxt partial])
   (:require [clojure.core :as core]))
 
-(deftype Fn [hash func]
+(defprotocol Intensional
+  (source-expr [f]
+    "Returns the source expression.")
+  (source-equiv [f g]
+    "Returns true if the source expression of f and g are equivalent."))
+
+
+(defn intensional? [f]
+  (satisfies? Intensional f))
+
+
+(deftype Fn [expr func]
+  Intensional
+  (source-expr [_] expr)
+  (source-equiv [_ g]
+    (or (= func g)
+        (and (intensional? g)
+             (= expr (source-expr g)))))
+
   Callable
   (call [_] (.call func))
 
@@ -61,12 +79,11 @@
   (meta [_]
     (.meta func))
   (withMeta [_ m]
-    (Fn. hash (.withMeta func m)))
+    (Fn. expr (.withMeta func m)))
 
   Object
-  (hashCode [_] hash)
-  (equals [_ f]
-    (= hash (core/hash f))))
+  (hashCode [_] (hash expr))
+  (equals [f g] (source-equiv f g)))
 
 
 
@@ -84,19 +101,19 @@
   ([f] f)
   ([f g & fs]
      (let [args (list* f g fs)]
-       (Fn. (reduce hash-combine (hash ::comp) args)
+       (Fn. (list* comp args)
             (apply core/comp args)))))
 
 (defn complement
   {:arglists (arglists core/complement)
    :doc (docstring core/complement)}
-  ([f] (Fn. (hash-combine (hash ::complement) f)
+  ([f] (Fn. (list complement f)
             (core/complement f))))
 
 (defn constantly
   {:arglists (arglists core/constantly)
    :doc (docstring core/constantly)}
-  ([x] (Fn. (hash-combine (hash ::constantly) x)
+  ([x] (Fn. (list constantly x)
             (core/constantly x))))
 
 (defn juxt
@@ -104,7 +121,7 @@
    :doc (docstring core/juxt)}
   ([f & fs]
      (let [args (list* f fs)]
-       (Fn. (reduce hash-combine (hash ::juxt) args)
+       (Fn. (list* juxt args)
             (apply core/juxt args)))))
 
 (defn partial
@@ -113,7 +130,7 @@
   ([f] f)
   ([f arg1 & more]
      (let [args (list* f arg1 more)]
-       (Fn. (reduce hash-combine (hash ::partial) args)
+       (Fn. (list* partial args)
             (apply core/partial args)))))
 
 
@@ -123,5 +140,4 @@
   {:arglists (arglists core/fn)
    :doc (docstring core/fn)}
   [& body]
-  `(Fn. ~(hash-combine (hash ::fn) body)
-        (core/fn ~@body)))
+  `(Fn. (quote ~&form) (core/fn ~@body)))
